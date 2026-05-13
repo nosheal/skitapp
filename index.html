@@ -119,6 +119,16 @@
   .breakdown-row + .breakdown-row { border-top: 1px solid rgba(255,255,255,0.04); }
   .breakdown-row .pts { color: var(--accent); font-weight: 700; }
   .breakdown-row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mode-chips { display: flex; gap: 8px; justify-content: center; margin: 6px 0 22px; flex-wrap: wrap; }
+  .chip {
+    background: transparent; border: 1px solid var(--line); color: var(--muted);
+    padding: 9px 16px; border-radius: 999px;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    font-weight: 700; cursor: pointer; transition: transform 0.1s, color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  .chip .count { color: inherit; opacity: 0.55; font-weight: 600; margin-left: 6px; }
+  .chip.selected { background: var(--accent); color: #1a1100; border-color: var(--accent); }
+  .chip:hover:not(.selected) { color: var(--ink); border-color: var(--ink); }
   .modal-btns { display: flex; gap: 10px; justify-content: center; }
   .primary-btn, .secondary-btn {
     border: none; padding: 12px 26px; border-radius: 999px;
@@ -200,7 +210,11 @@
   <div class="modal-card">
     <div class="modal-kicker" id="start-kicker">Daily Ski Game</div>
     <h1 class="modal-title">SkiTap</h1>
-    <p class="modal-body">Five rounds. Each one names a ski resort somewhere on Earth — spin the globe and tap where you think it sits. Closer guess = more points. Scored out of 100. <strong style="color:var(--ink)">Same puzzle for everyone today.</strong></p>
+    <p class="modal-body">Five rounds. Each one names a ski resort — spin the globe and tap where you think it sits. Closer guess = more points. Scored out of 100. <strong style="color:var(--ink)">Same puzzle for everyone today.</strong></p>
+    <div class="mode-chips" id="mode-chips">
+      <button class="chip selected" data-mode="world">World <span class="count" id="count-world"></span></button>
+      <button class="chip" data-mode="na">North America <span class="count" id="count-na"></span></button>
+    </div>
     <button class="primary-btn" id="start-btn">Start Today's Puzzle</button>
   </div>
 </div>
@@ -244,6 +258,18 @@ const RESORTS = [
   { name: "Banff Sunshine", country: "Alberta, Canada", lat: 51.0814, lng: -115.7647, wiki: "Sunshine Village" },
   { name: "Revelstoke", country: "British Columbia, Canada", lat: 50.9558, lng: -118.1647, wiki: "Revelstoke Mountain Resort" },
   { name: "Mont-Tremblant", country: "Québec, Canada", lat: 46.2103, lng: -74.5847, wiki: "Mont Tremblant Resort" },
+  { name: "Snowbird", country: "Utah, USA", lat: 40.5810, lng: -111.6557, wiki: "Snowbird, Utah" },
+  { name: "Steamboat", country: "Colorado, USA", lat: 40.4570, lng: -106.8050, wiki: "Steamboat Ski Resort" },
+  { name: "Beaver Creek", country: "Colorado, USA", lat: 39.6042, lng: -106.5169, wiki: "Beaver Creek Resort" },
+  { name: "Winter Park", country: "Colorado, USA", lat: 39.8911, lng: -105.7625, wiki: "Winter Park Resort" },
+  { name: "Arapahoe Basin", country: "Colorado, USA", lat: 39.6425, lng: -105.8717, wiki: "Arapahoe Basin" },
+  { name: "Taos Ski Valley", country: "New Mexico, USA", lat: 36.5969, lng: -105.4444, wiki: "Taos Ski Valley" },
+  { name: "Mount Bachelor", country: "Oregon, USA", lat: 43.9783, lng: -121.6889, wiki: "Mount Bachelor ski area" },
+  { name: "Crystal Mountain", country: "Washington, USA", lat: 46.9270, lng: -121.4742, wiki: "Crystal Mountain (Washington)" },
+  { name: "Schweitzer", country: "Idaho, USA", lat: 48.3677, lng: -116.6228, wiki: "Schweitzer Mountain Resort" },
+  { name: "Kicking Horse", country: "British Columbia, Canada", lat: 51.2989, lng: -117.0306, wiki: "Kicking Horse Mountain Resort" },
+  { name: "Big White", country: "British Columbia, Canada", lat: 49.7142, lng: -118.9381, wiki: "Big White Ski Resort" },
+  { name: "Marmot Basin", country: "Alberta, Canada", lat: 52.8042, lng: -118.0844, wiki: "Marmot Basin" },
   { name: "Zermatt", country: "Switzerland", lat: 46.0207, lng: 7.7491, wiki: "Zermatt" },
   { name: "St. Moritz", country: "Switzerland", lat: 46.4983, lng: 9.8383, wiki: "St. Moritz" },
   { name: "Verbier", country: "Switzerland", lat: 46.0961, lng: 7.2286, wiki: "Verbier" },
@@ -294,6 +320,7 @@ const DECAY_KM = 1800;
 const MAX_TOTAL = ROUNDS * MAX_POINTS;
 
 const state = {
+  mode: 'world',
   round: 0,
   score: 0,
   history: [],
@@ -301,6 +328,13 @@ const state = {
   guessLocked: false,
   currentResort: null,
 };
+
+const MODES = {
+  world: { label: 'World', short: '', filter: () => true },
+  na:    { label: 'North America', short: 'NA', filter: r => /USA|Canada/.test(r.country) },
+};
+function pool(mode) { return RESORTS.filter(MODES[mode].filter); }
+function seedFor(mode) { return mode === 'na' ? puzzleNumber() * 31 + 7 : puzzleNumber(); }
 
 function haversineKm(a, b) {
   const R = 6371;
@@ -573,7 +607,7 @@ function startGame() {
   state.round = 0;
   state.score = 0;
   state.history = [];
-  state.queue = seededShuffle(RESORTS, puzzleNumber()).slice(0, ROUNDS);
+  state.queue = seededShuffle(pool(state.mode), seedFor(state.mode)).slice(0, ROUNDS);
   document.getElementById('score-display').textContent = '0';
   document.getElementById('start-modal').classList.add('hidden');
   document.getElementById('end-modal').classList.add('hidden');
@@ -615,7 +649,8 @@ function showEnd() {
 
 async function share() {
   const scoreOf100 = Math.round((state.score / MAX_TOTAL) * 100);
-  const text = `SkiTap #${puzzleNumber()} — ${scoreOf100}/100 🎿\n${buildEmojiRow()}\n${ratingFor(scoreOf100)}\nhttps://nosheal.github.io/skitapp`;
+  const tag = MODES[state.mode].short ? ` ${MODES[state.mode].short}` : '';
+  const text = `SkiTap${tag} #${puzzleNumber()} — ${scoreOf100}/100 🎿\n${buildEmojiRow()}\n${ratingFor(scoreOf100)}\nhttps://nosheal.github.io/skitapp`;
   if (navigator.share) {
     try { await navigator.share({ title: 'SkiTap', text }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
@@ -635,9 +670,25 @@ document.getElementById('restart-btn').addEventListener('click', startGame);
 document.getElementById('next-btn').addEventListener('click', nextRound);
 document.getElementById('share-btn').addEventListener('click', share);
 
-document.getElementById('start-kicker').textContent = `Puzzle #${puzzleNumber()} · ${puzzleDateLabel()}`;
-document.getElementById('end-kicker').textContent = `Puzzle #${puzzleNumber()} · Final Score`;
+function refreshKickers() {
+  const m = MODES[state.mode];
+  document.getElementById('start-kicker').textContent = `${m.label} · Puzzle #${puzzleNumber()} · ${puzzleDateLabel()}`;
+  document.getElementById('end-kicker').textContent = `${m.label} · Puzzle #${puzzleNumber()} · Final Score`;
+}
+
+document.querySelectorAll('#mode-chips .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('#mode-chips .chip').forEach(c => c.classList.remove('selected'));
+    chip.classList.add('selected');
+    state.mode = chip.dataset.mode;
+    refreshKickers();
+  });
+});
+
+document.getElementById('count-world').textContent = pool('world').length;
+document.getElementById('count-na').textContent = pool('na').length;
 document.getElementById('restart-btn').textContent = 'Replay';
+refreshKickers();
 </script>
 </body>
 </html>
