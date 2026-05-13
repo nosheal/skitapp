@@ -113,7 +113,7 @@
   .modal-score { font-size: 72px; font-weight: 900; color: var(--accent); margin: 0; letter-spacing: -0.03em; line-height: 1; }
   .modal-score .of { font-size: 28px; color: var(--muted); font-weight: 700; }
   .modal-rating { font-size: 14px; letter-spacing: 0.16em; color: var(--ink); text-transform: uppercase; margin: 8px 0 18px; font-weight: 700; }
-  .emoji-row { font-size: 28px; letter-spacing: 4px; margin: 8px 0 18px; }
+  .emoji-row { font-size: 20px; font-weight: 700; letter-spacing: 0.02em; margin: 6px 0 18px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-x: auto; }
   .breakdown { text-align: left; margin: 0 0 18px; padding: 12px 14px; background: rgba(255,255,255,0.025); border-radius: 10px; }
   .breakdown-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 5px 0; gap: 8px; }
   .breakdown-row + .breakdown-row { border-top: 1px solid rgba(255,255,255,0.04); }
@@ -173,7 +173,7 @@
       <div class="stat-value" id="round-display">1 / 5</div>
     </div>
     <div>
-      <div class="stat-label">Score</div>
+      <div class="stat-label">Score / 500</div>
       <div class="stat-value" id="score-display">0</div>
     </div>
   </div>
@@ -222,7 +222,7 @@
 <div class="modal hidden" id="end-modal">
   <div class="modal-card">
     <div class="modal-kicker" id="end-kicker">Final Score</div>
-    <div class="modal-score"><span id="final-score">0</span><span class="of">/100</span></div>
+    <div class="modal-score"><span id="final-score">0</span><span class="of">/500</span></div>
     <div class="modal-rating" id="final-rating">—</div>
     <div class="emoji-row" id="emoji-row"></div>
     <div class="breakdown" id="breakdown"></div>
@@ -562,11 +562,11 @@ async function onMapClick(e) {
     map.fitBounds(bounds, { padding: { top: 180, bottom: 300, left: 80, right: 80 }, duration: 1500, pitch: 35, maxZoom: 7 });
   }
 
-  document.getElementById('score-display').textContent = state.score.toLocaleString();
+  document.getElementById('score-display').textContent = finalSumOf500();
   document.getElementById('result-name').textContent = truth.name;
   document.getElementById('result-sub').textContent = truth.country;
   document.getElementById('result-distance').textContent = formatDistance(km);
-  document.getElementById('result-points').textContent = '+' + pts.toLocaleString();
+  document.getElementById('result-points').textContent = '+' + roundScoreOf100(pts);
   document.getElementById('next-btn').textContent = state.round === ROUNDS ? 'See Results' : 'Next';
 
   const photoEl = document.getElementById('result-photo');
@@ -631,34 +631,46 @@ function ratingFor(scoreOf100) {
   return 'Bunny Slope';
 }
 
-function emojiForPts(pts) {
-  if (pts >= 4500) return '🟩';
-  if (pts >= 3500) return '🟨';
-  if (pts >= 2500) return '🟧';
-  if (pts >= 1000) return '🟥';
-  return '⬛';
+function roundScoreOf100(pts) { return Math.round(pts / 50); }
+
+function emojiForRound(s) {
+  if (s >= 99) return '🎯';
+  if (s >= 90) return '🔥';
+  if (s >= 70) return '👍';
+  if (s >= 40) return '💨';
+  return '❄️';
 }
 
-function buildEmojiRow() {
-  return state.history.map(h => emojiForPts(h.pts)).join('');
+function buildRoundRow() {
+  return state.history.map(h => {
+    const s = roundScoreOf100(h.pts);
+    return `${s}${emojiForRound(s)}`;
+  }).join(' ');
 }
+
+function shortDateLabel() {
+  return new Date(todayUTC()).toLocaleDateString(undefined, { month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
+function finalSumOf500() { return Math.round(state.score / 50); }
+function scorePct() { return Math.round((state.score / MAX_TOTAL) * 100); }
 
 function showEnd() {
-  const scoreOf100 = Math.round((state.score / MAX_TOTAL) * 100);
-  document.getElementById('final-score').textContent = scoreOf100;
-  document.getElementById('final-rating').textContent = ratingFor(scoreOf100);
-  document.getElementById('emoji-row').textContent = buildEmojiRow();
-  const rows = state.history.map(h =>
-    `<div class="breakdown-row"><span class="name">${h.resort.name}</span><span><span style="color:var(--muted)">${formatDistance(h.km)}</span> &nbsp; <span class="pts">+${h.pts.toLocaleString()}</span></span></div>`
-  ).join('');
+  const pct = scorePct();
+  document.getElementById('final-score').textContent = finalSumOf500();
+  document.getElementById('final-rating').textContent = `${ratingFor(pct)} · ${pct}/100`;
+  document.getElementById('emoji-row').textContent = buildRoundRow();
+  const rows = state.history.map(h => {
+    const s = roundScoreOf100(h.pts);
+    return `<div class="breakdown-row"><span class="name">${h.resort.name}</span><span><span style="color:var(--muted)">${formatDistance(h.km)}</span> &nbsp; <span class="pts">+${s}</span></span></div>`;
+  }).join('');
   document.getElementById('breakdown').innerHTML = rows;
   document.getElementById('end-modal').classList.remove('hidden');
 }
 
 async function share() {
-  const scoreOf100 = Math.round((state.score / MAX_TOTAL) * 100);
   const tag = MODES[state.mode].short ? ` ${MODES[state.mode].short}` : '';
-  const text = `SkiTap${tag} #${puzzleNumber()} — ${scoreOf100}/100 🎿\n${buildEmojiRow()}\n${ratingFor(scoreOf100)}\n${shareUrlFor(state.mode)}`;
+  const text = `SkiTap${tag} ${shortDateLabel()}\n${buildRoundRow()}\nFinal score: ${finalSumOf500()}\n${shareUrlFor(state.mode)}`;
   if (navigator.share) {
     try { await navigator.share({ title: 'SkiTap', text }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
