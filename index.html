@@ -594,6 +594,32 @@ function scoreFromKm(km, mode) {
   return Math.round(MAX_POINTS * Math.exp(-km / decay));
 }
 
+// Distance from point to a 2D polyline segment, returned in meters.
+// Local equirectangular approximation — accurate for the small (<5km) Alta extent.
+function distanceToSegmentMeters(p, a, b) {
+  const latRef = (a[1] + b[1]) / 2 * Math.PI / 180;
+  const mDegLng = 111320 * Math.cos(latRef);
+  const mDegLat = 110540;
+  const ax = a[0] * mDegLng, ay = a[1] * mDegLat;
+  const bx = b[0] * mDegLng, by = b[1] * mDegLat;
+  const px = p.lng * mDegLng, py = p.lat * mDegLat;
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+
+function distanceToPolylineMeters(p, polyline) {
+  let min = Infinity;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const d = distanceToSegmentMeters(p, polyline[i], polyline[i + 1]);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 function mulberry32(seed) {
   let s = seed >>> 0;
   return function () {
@@ -953,7 +979,15 @@ async function onMapClick(e) {
 
   const guess = { lat: e.lngLat.lat, lng: e.lngLat.lng };
   const truth = state.currentResort;
-  const km = haversineKm(guess, truth);
+  // Alta: distance is to the closest point on the actual run polyline.
+  // A guess landing on (or within 5m of) the line scores a perfect 100.
+  let km;
+  if (MODES[state.mode].scope === 'alta' && truth.geom && truth.geom.length >= 2) {
+    const m = distanceToPolylineMeters(guess, truth.geom);
+    km = m < 5 ? 0 : m / 1000;
+  } else {
+    km = haversineKm(guess, truth);
+  }
   const pts = scoreFromKm(km, state.mode);
   state.score += pts;
   state.history.push({ resort: truth, km, pts });
