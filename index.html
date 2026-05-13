@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>SkiTap — Daily Ski Resort Game</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --bg: #050810;
+    --panel: #0f131b;
+    --line: #1c2230;
+    --ink: #e7ecf3;
+    --muted: #8a93a3;
+    --accent: #f7c948;
+    --good: #5cd0a1;
+    --bad: #ff6b6b;
+    --snow: #f3f7fb;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: 'Inter', system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif; }
+  #map { position: absolute; inset: 0; }
+
+  /* Custom target-reticle cursor (yellow on dark map) */
+  .reticle .maplibregl-canvas {
+    cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><g fill='none' stroke='%23f7c948' stroke-width='2'><circle cx='16' cy='16' r='11'/><line x1='16' y1='2' x2='16' y2='9'/><line x1='16' y1='23' x2='16' y2='30'/><line x1='2' y1='16' x2='9' y2='16'/><line x1='23' y1='16' x2='30' y2='16'/></g><circle cx='16' cy='16' r='2.5' fill='%23f7c948'/></svg>") 16 16, crosshair;
+  }
+  .locked .maplibregl-canvas { cursor: grab; }
+
+  /* Top HUD */
+  .hud {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 22px;
+    background: linear-gradient(to bottom, rgba(5,8,16,0.94), rgba(5,8,16,0));
+    pointer-events: none;
+  }
+  .brand { font-weight: 900; letter-spacing: 0.18em; font-size: 13px; color: var(--accent); }
+  .brand span { color: var(--ink); }
+  .hud-stat { display: flex; gap: 28px; align-items: center; pointer-events: auto; }
+  .stat-label { font-size: 10px; letter-spacing: 0.18em; color: var(--muted); text-transform: uppercase; }
+  .stat-value { font-size: 18px; font-weight: 800; letter-spacing: 0.04em; }
+
+  /* Prompt card */
+  .prompt {
+    position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+    z-index: 5; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 14px 22px; min-width: 280px; text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.55);
+    pointer-events: none;
+  }
+  .prompt-label { font-size: 10px; letter-spacing: 0.22em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .prompt-name { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; }
+  .prompt-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  /* Result drawer */
+  .result {
+    position: absolute; left: 50%; bottom: -360px; transform: translateX(-50%);
+    z-index: 6; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 18px; width: 540px; max-width: calc(100vw - 24px);
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.65);
+    transition: bottom 0.35s cubic-bezier(.2,.8,.2,1);
+  }
+  .result.show { bottom: 24px; }
+  .result-row { display: flex; gap: 16px; align-items: stretch; }
+  .result-photo {
+    width: 180px; height: 130px; border-radius: 10px; flex-shrink: 0;
+    background: #1a1f2b center/cover no-repeat;
+    border: 1px solid var(--line);
+    position: relative; overflow: hidden;
+  }
+  .result-photo.empty::after {
+    content: 'No photo'; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 11px; letter-spacing: 0.1em;
+  }
+  .result-photo .photo-credit {
+    position: absolute; bottom: 4px; right: 6px;
+    font-size: 9px; color: rgba(255,255,255,0.7); background: rgba(0,0,0,0.4);
+    padding: 1px 5px; border-radius: 3px; letter-spacing: 0.04em;
+  }
+  .result-body { flex: 1; min-width: 0; }
+  .result-name { font-size: 20px; font-weight: 800; line-height: 1.15; }
+  .result-sub { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .result-grid { display: flex; gap: 26px; margin-bottom: 12px; }
+  .result-cell-label { font-size: 10px; letter-spacing: 0.18em; color: var(--muted); text-transform: uppercase; }
+  .result-cell-value { font-size: 22px; font-weight: 800; margin-top: 2px; }
+  .result-cell-value.pts { color: var(--accent); }
+  .next-btn {
+    background: var(--accent); color: #1a1100; border: none; padding: 10px 22px;
+    border-radius: 999px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; font-size: 12px; transition: transform 0.1s;
+  }
+  .next-btn:hover { transform: scale(1.03); }
+  .next-btn:active { transform: scale(0.97); }
+
+  /* Modal (start / final) */
+  .modal {
+    position: absolute; inset: 0; z-index: 10; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(5,8,16,0.82); backdrop-filter: blur(10px);
+  }
+  .modal.hidden { display: none; }
+  .modal-card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 18px; padding: 32px 36px; min-width: 380px; max-width: 520px; width: 100%;
+    text-align: center; box-shadow: 0 20px 80px rgba(0,0,0,0.7);
+  }
+  .modal-kicker { font-size: 11px; letter-spacing: 0.22em; color: var(--accent); text-transform: uppercase; margin-bottom: 8px; }
+  .modal-title { font-size: 32px; font-weight: 900; letter-spacing: -0.02em; margin: 0 0 10px; }
+  .modal-body { font-size: 14px; line-height: 1.55; color: var(--muted); margin-bottom: 22px; }
+  .modal-score { font-size: 72px; font-weight: 900; color: var(--accent); margin: 0; letter-spacing: -0.03em; line-height: 1; }
+  .modal-score .of { font-size: 28px; color: var(--muted); font-weight: 700; }
+  .modal-rating { font-size: 14px; letter-spacing: 0.16em; color: var(--ink); text-transform: uppercase; margin: 8px 0 18px; font-weight: 700; }
+  .emoji-row { font-size: 28px; letter-spacing: 4px; margin: 8px 0 18px; }
+  .breakdown { text-align: left; margin: 0 0 18px; padding: 12px 14px; background: rgba(255,255,255,0.025); border-radius: 10px; }
+  .breakdown-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 5px 0; gap: 8px; }
+  .breakdown-row + .breakdown-row { border-top: 1px solid rgba(255,255,255,0.04); }
+  .breakdown-row .pts { color: var(--accent); font-weight: 700; }
+  .breakdown-row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .modal-btns { display: flex; gap: 10px; justify-content: center; }
+  .primary-btn, .secondary-btn {
+    border: none; padding: 12px 26px; border-radius: 999px;
+    font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; font-size: 12px; transition: transform 0.1s;
+  }
+  .primary-btn { background: var(--accent); color: #1a1100; }
+  .secondary-btn { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .primary-btn:hover, .secondary-btn:hover { transform: scale(1.03); }
+  .share-toast {
+    position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%);
+    background: var(--good); color: #07150f; padding: 10px 22px; border-radius: 999px;
+    font-weight: 700; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    opacity: 0; transition: opacity 0.25s; pointer-events: none; z-index: 20;
+  }
+  .share-toast.show { opacity: 1; }
+
+  @media (max-width: 600px) {
+    .prompt { min-width: 220px; padding: 10px 16px; top: 60px; }
+    .prompt-name { font-size: 18px; }
+    .hud { padding: 12px 16px; }
+    .hud-stat { gap: 16px; }
+    .stat-value { font-size: 15px; }
+    .result { width: calc(100vw - 16px); padding: 14px; }
+    .result.show { bottom: 12px; }
+    .result-row { flex-direction: column; }
+    .result-photo { width: 100%; height: 140px; }
+    .modal-card { min-width: 0; padding: 24px 22px; }
+    .modal-score { font-size: 56px; }
+  }
+</style>
+</head>
+<body class="reticle">
+
+<div id="map"></div>
+
+<div class="hud">
+  <div class="brand">SKI<span>TAP</span></div>
+  <div class="hud-stat">
+    <div>
+      <div class="stat-label">Round</div>
+      <div class="stat-value" id="round-display">1 / 5</div>
+    </div>
+    <div>
+      <div class="stat-label">Score</div>
+      <div class="stat-value" id="score-display">0</div>
+    </div>
+  </div>
+</div>
+
+<div class="prompt" id="prompt">
+  <div class="prompt-label">Find</div>
+  <div class="prompt-name" id="prompt-name">—</div>
+  <div class="prompt-hint" id="prompt-hint">Tap the globe where you think it is</div>
+</div>
+
+<div class="result" id="result">
+  <div class="result-row">
+    <div class="result-photo empty" id="result-photo"></div>
+    <div class="result-body">
+      <div class="result-name" id="result-name"></div>
+      <div class="result-sub" id="result-sub"></div>
+      <div class="result-grid">
+        <div>
+          <div class="result-cell-label">Distance</div>
+          <div class="result-cell-value" id="result-distance">—</div>
+        </div>
+        <div>
+          <div class="result-cell-label">Points</div>
+          <div class="result-cell-value pts" id="result-points">—</div>
+        </div>
+      </div>
+      <button class="next-btn" id="next-btn">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="start-modal">
+  <div class="modal-card">
+    <div class="modal-kicker">Daily Ski Game</div>
+    <h1 class="modal-title">SkiTap</h1>
+    <p class="modal-body">Five rounds. Each one names a ski resort somewhere on Earth — spin the globe and tap where you think it sits. Closer guess = more points. Scored out of 100.</p>
+    <button class="primary-btn" id="start-btn">Start</button>
+  </div>
+</div>
+
+<div class="modal hidden" id="end-modal">
+  <div class="modal-card">
+    <div class="modal-kicker">Final Score</div>
+    <div class="modal-score"><span id="final-score">0</span><span class="of">/100</span></div>
+    <div class="modal-rating" id="final-rating">—</div>
+    <div class="emoji-row" id="emoji-row"></div>
+    <div class="breakdown" id="breakdown"></div>
+    <div class="modal-btns">
+      <button class="primary-btn" id="share-btn">Share</button>
+      <button class="secondary-btn" id="restart-btn">Play Again</button>
+    </div>
+  </div>
+</div>
+
+<div class="share-toast" id="share-toast">Copied to clipboard</div>
+
+<script>
+const RESORTS = [
+  { name: "Aspen Snowmass", country: "Colorado, USA", lat: 39.2089, lng: -106.9498, wiki: "Aspen/Snowmass" },
+  { name: "Vail", country: "Colorado, USA", lat: 39.6061, lng: -106.3550, wiki: "Vail Ski Resort" },
+  { name: "Breckenridge", country: "Colorado, USA", lat: 39.4817, lng: -106.0384, wiki: "Breckenridge Ski Resort" },
+  { name: "Telluride", country: "Colorado, USA", lat: 37.9375, lng: -107.8123, wiki: "Telluride Ski Resort" },
+  { name: "Park City", country: "Utah, USA", lat: 40.6514, lng: -111.5080, wiki: "Park City Mountain Resort" },
+  { name: "Deer Valley", country: "Utah, USA", lat: 40.6310, lng: -111.4801, wiki: "Deer Valley" },
+  { name: "Alta", country: "Utah, USA", lat: 40.5883, lng: -111.6378, wiki: "Alta Ski Area" },
+  { name: "Jackson Hole", country: "Wyoming, USA", lat: 43.5875, lng: -110.8279, wiki: "Jackson Hole Mountain Resort" },
+  { name: "Big Sky", country: "Montana, USA", lat: 45.2841, lng: -111.4017, wiki: "Big Sky Resort" },
+  { name: "Sun Valley", country: "Idaho, USA", lat: 43.6711, lng: -114.3520, wiki: "Sun Valley Resort" },
+  { name: "Mammoth Mountain", country: "California, USA", lat: 37.6308, lng: -119.0326, wiki: "Mammoth Mountain Ski Area" },
+  { name: "Palisades Tahoe", country: "California, USA", lat: 39.1969, lng: -120.2358, wiki: "Palisades Tahoe" },
+  { name: "Heavenly", country: "California / Nevada, USA", lat: 38.9353, lng: -119.9402, wiki: "Heavenly Mountain Resort" },
+  { name: "Killington", country: "Vermont, USA", lat: 43.6042, lng: -72.8201, wiki: "Killington Ski Resort" },
+  { name: "Stowe", country: "Vermont, USA", lat: 44.5311, lng: -72.7814, wiki: "Stowe Mountain Resort" },
+  { name: "Sugarloaf", country: "Maine, USA", lat: 45.0314, lng: -70.3133, wiki: "Sugarloaf, Maine" },
+  { name: "Whistler Blackcomb", country: "British Columbia, Canada", lat: 50.1163, lng: -122.9574, wiki: "Whistler Blackcomb" },
+  { name: "Lake Louise", country: "Alberta, Canada", lat: 51.4419, lng: -116.1773, wiki: "Lake Louise Ski Resort" },
+  { name: "Banff Sunshine", country: "Alberta, Canada", lat: 51.0814, lng: -115.7647, wiki: "Sunshine Village" },
+  { name: "Revelstoke", country: "British Columbia, Canada", lat: 50.9558, lng: -118.1647, wiki: "Revelstoke Mountain Resort" },
+  { name: "Mont-Tremblant", country: "Québec, Canada", lat: 46.2103, lng: -74.5847, wiki: "Mont Tremblant Resort" },
+  { name: "Zermatt", country: "Switzerland", lat: 46.0207, lng: 7.7491, wiki: "Zermatt" },
+  { name: "St. Moritz", country: "Switzerland", lat: 46.4983, lng: 9.8383, wiki: "St. Moritz" },
+  { name: "Verbier", country: "Switzerland", lat: 46.0961, lng: 7.2286, wiki: "Verbier" },
+  { name: "Davos", country: "Switzerland", lat: 46.8047, lng: 9.8347, wiki: "Davos" },
+  { name: "Chamonix", country: "France", lat: 45.9237, lng: 6.8694, wiki: "Chamonix" },
+  { name: "Val d'Isère", country: "France", lat: 45.4485, lng: 6.9803, wiki: "Val-d'Isère" },
+  { name: "Courchevel", country: "France", lat: 45.4154, lng: 6.6347, wiki: "Courchevel" },
+  { name: "Méribel", country: "France", lat: 45.3961, lng: 6.5650, wiki: "Méribel" },
+  { name: "Les Deux Alpes", country: "France", lat: 45.0118, lng: 6.1244, wiki: "Les Deux Alpes" },
+  { name: "Kitzbühel", country: "Austria", lat: 47.4467, lng: 12.3925, wiki: "Kitzbühel" },
+  { name: "St. Anton am Arlberg", country: "Austria", lat: 47.1284, lng: 10.2682, wiki: "St. Anton am Arlberg" },
+  { name: "Sölden", country: "Austria", lat: 46.9684, lng: 11.0072, wiki: "Sölden" },
+  { name: "Ischgl", country: "Austria", lat: 47.0103, lng: 10.2920, wiki: "Ischgl" },
+  { name: "Cortina d'Ampezzo", country: "Italy", lat: 46.5405, lng: 12.1357, wiki: "Cortina d'Ampezzo" },
+  { name: "Livigno", country: "Italy", lat: 46.5380, lng: 10.1357, wiki: "Livigno" },
+  { name: "Madonna di Campiglio", country: "Italy", lat: 46.2294, lng: 10.8253, wiki: "Madonna di Campiglio" },
+  { name: "Grandvalira", country: "Andorra", lat: 42.5421, lng: 1.7335, wiki: "Grandvalira" },
+  { name: "Baqueira Beret", country: "Spain", lat: 42.7011, lng: 0.9333, wiki: "Baqueira Beret" },
+  { name: "Sierra Nevada", country: "Spain", lat: 37.0951, lng: -3.3979, wiki: "Sierra Nevada Ski Station" },
+  { name: "Åre", country: "Sweden", lat: 63.3997, lng: 13.0827, wiki: "Åre" },
+  { name: "Trysil", country: "Norway", lat: 61.2880, lng: 12.2666, wiki: "Trysil" },
+  { name: "Hemsedal", country: "Norway", lat: 60.8631, lng: 8.5594, wiki: "Hemsedal" },
+  { name: "Levi", country: "Finland", lat: 67.8047, lng: 24.8067, wiki: "Levi, Finland" },
+  { name: "Rosa Khutor", country: "Russia", lat: 43.6781, lng: 40.2933, wiki: "Rosa Khutor Alpine Resort" },
+  { name: "Niseko United", country: "Hokkaido, Japan", lat: 42.8047, lng: 140.6874, wiki: "Niseko" },
+  { name: "Hakuba Valley", country: "Nagano, Japan", lat: 36.6989, lng: 137.8378, wiki: "Hakuba, Nagano" },
+  { name: "Zao Onsen", country: "Yamagata, Japan", lat: 38.1573, lng: 140.3870, wiki: "Zaō Onsen" },
+  { name: "Furano", country: "Hokkaido, Japan", lat: 43.3406, lng: 142.3825, wiki: "Furano, Hokkaido" },
+  { name: "Yongpyong", country: "South Korea", lat: 37.6360, lng: 128.6720, wiki: "Yongpyong Resort" },
+  { name: "Yabuli", country: "China", lat: 44.7019, lng: 128.6453, wiki: "Yabuli Ski Resort" },
+  { name: "Gulmarg", country: "Kashmir, India", lat: 34.0481, lng: 74.3805, wiki: "Gulmarg" },
+  { name: "Portillo", country: "Chile", lat: -32.8369, lng: -70.1273, wiki: "Ski Portillo" },
+  { name: "Valle Nevado", country: "Chile", lat: -33.3536, lng: -70.2536, wiki: "Valle Nevado" },
+  { name: "Las Leñas", country: "Argentina", lat: -35.1497, lng: -70.0786, wiki: "Las Leñas" },
+  { name: "Cerro Catedral", country: "Argentina", lat: -41.1668, lng: -71.4242, wiki: "Cerro Catedral" },
+  { name: "Treble Cone", country: "New Zealand", lat: -44.6275, lng: 168.8956, wiki: "Treble Cone" },
+  { name: "The Remarkables", country: "New Zealand", lat: -45.0533, lng: 168.8090, wiki: "The Remarkables" },
+  { name: "Cardrona", country: "New Zealand", lat: -44.8722, lng: 168.9486, wiki: "Cardrona Alpine Resort" },
+  { name: "Coronet Peak", country: "New Zealand", lat: -44.9286, lng: 168.7333, wiki: "Coronet Peak" },
+  { name: "Mt. Buller", country: "Australia", lat: -37.1465, lng: 146.4366, wiki: "Mount Buller, Victoria" },
+  { name: "Perisher", country: "Australia", lat: -36.4054, lng: 148.4140, wiki: "Perisher Ski Resort" },
+  { name: "Thredbo", country: "Australia", lat: -36.5044, lng: 148.3019, wiki: "Thredbo" },
+];
+
+const ROUNDS = 5;
+const MAX_POINTS = 5000;
+const DECAY_KM = 1800;
+const MAX_TOTAL = ROUNDS * MAX_POINTS;
+
+const state = {
+  round: 0,
+  score: 0,
+  history: [],
+  queue: [],
+  guessLocked: false,
+  currentResort: null,
+};
+
+function haversineKm(a, b) {
+  const R = 6371;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLng / 2);
+  const x = s1 * s1 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * s2 * s2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+function scoreFromKm(km) {
+  return Math.round(MAX_POINTS * Math.exp(-km / DECAY_KM));
+}
+
+function shuffle(arr) {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function greatCircleLine(a, b, steps = 96) {
+  const toRad = d => d * Math.PI / 180;
+  const toDeg = r => r * 180 / Math.PI;
+  const lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+  const lng1 = toRad(a.lng), lng2 = toRad(b.lng);
+  const dLat = lat2 - lat1;
+  const dLng = lng2 - lng1;
+  const A = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const d = 2 * Math.asin(Math.sqrt(A));
+  if (d === 0) return [[a.lng, a.lat], [b.lng, b.lat]];
+  const coords = [];
+  for (let i = 0; i <= steps; i++) {
+    const f = i / steps;
+    const A2 = Math.sin((1 - f) * d) / Math.sin(d);
+    const B2 = Math.sin(f * d) / Math.sin(d);
+    const x = A2 * Math.cos(lat1) * Math.cos(lng1) + B2 * Math.cos(lat2) * Math.cos(lng2);
+    const y = A2 * Math.cos(lat1) * Math.sin(lng1) + B2 * Math.cos(lat2) * Math.sin(lng2);
+    const z = A2 * Math.sin(lat1) + B2 * Math.sin(lat2);
+    const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
+    const lng = Math.atan2(y, x);
+    coords.push([toDeg(lng), toDeg(lat)]);
+  }
+  return coords;
+}
+
+const imageCache = new Map();
+async function fetchResortImage(resort) {
+  const key = resort.wiki || resort.name;
+  if (imageCache.has(key)) return imageCache.get(key);
+  const url = `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&piprop=thumbnail|name&pithumbsize=600&titles=${encodeURIComponent(key)}&format=json&redirects=1&origin=*`;
+  try {
+    const r = await fetch(url);
+    const j = await r.json();
+    const pages = j.query && j.query.pages;
+    if (pages) {
+      for (const id in pages) {
+        const t = pages[id].thumbnail;
+        if (t && t.source) {
+          imageCache.set(key, t.source);
+          return t.source;
+        }
+      }
+    }
+  } catch (e) { /* network or CORS — fall through */ }
+  imageCache.set(key, null);
+  return null;
+}
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center: [10, 30],
+  zoom: 1.2,
+  attributionControl: { compact: true },
+  dragRotate: true,
+  maxPitch: 75,
+});
+
+map.on('load', () => {
+  try { map.setProjection({ type: 'globe' }); } catch (e) { console.warn('Globe not supported', e); }
+
+  map.getStyle().layers.forEach(l => {
+    if (l.type === 'symbol') map.setLayoutProperty(l.id, 'visibility', 'none');
+  });
+
+  // Mapzen Terrarium DEM tiles (AWS Open Data, real elevation)
+  map.addSource('terrain-dem', {
+    type: 'raster-dem',
+    tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+    encoding: 'terrarium',
+    tileSize: 256,
+    maxzoom: 13,
+    attribution: 'Elevation: Mapzen / AWS Open Data',
+  });
+
+  // Hillshade tuned snow-white on highlights, deep blue in shadow.
+  // Insert below the basemap's water layer so ocean bathymetry is hidden.
+  const waterLayer = map.getStyle().layers.find(l => /water/i.test(l.id) && l.type === 'fill');
+  map.addLayer({
+    id: 'hillshade-snow',
+    type: 'hillshade',
+    source: 'terrain-dem',
+    paint: {
+      'hillshade-shadow-color': '#0a1929',
+      'hillshade-highlight-color': '#f3f7fb',
+      'hillshade-accent-color': '#7da3c8',
+      'hillshade-exaggeration': 0.85,
+      'hillshade-illumination-anchor': 'viewport',
+      'hillshade-illumination-direction': 335,
+    },
+  }, waterLayer ? waterLayer.id : undefined);
+
+  try { map.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 }); } catch (e) { console.warn('Terrain disabled', e); }
+
+  map.addSource('guess', { type: 'geojson', data: empty() });
+  map.addSource('truth', { type: 'geojson', data: empty() });
+  map.addSource('arc', { type: 'geojson', data: empty() });
+
+  map.addLayer({
+    id: 'arc-line',
+    type: 'line',
+    source: 'arc',
+    paint: { 'line-color': '#f7c948', 'line-width': 2, 'line-dasharray': [2, 2], 'line-opacity': 0.85 },
+  });
+  map.addLayer({
+    id: 'guess-halo',
+    type: 'circle',
+    source: 'guess',
+    paint: { 'circle-radius': 14, 'circle-color': '#ff6b6b', 'circle-opacity': 0.18, 'circle-stroke-color': '#ff6b6b', 'circle-stroke-width': 1, 'circle-stroke-opacity': 0.6 },
+  });
+  map.addLayer({
+    id: 'guess-dot',
+    type: 'circle',
+    source: 'guess',
+    paint: { 'circle-radius': 6, 'circle-color': '#ff6b6b', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+  });
+  map.addLayer({
+    id: 'truth-halo',
+    type: 'circle',
+    source: 'truth',
+    paint: { 'circle-radius': 16, 'circle-color': '#5cd0a1', 'circle-opacity': 0.22, 'circle-stroke-color': '#5cd0a1', 'circle-stroke-width': 1, 'circle-stroke-opacity': 0.75 },
+  });
+  map.addLayer({
+    id: 'truth-dot',
+    type: 'circle',
+    source: 'truth',
+    paint: { 'circle-radius': 7, 'circle-color': '#5cd0a1', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+  });
+
+  map.on('click', onMapClick);
+});
+
+function empty() { return { type: 'FeatureCollection', features: [] }; }
+function pointFC(lng, lat) {
+  return { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} }] };
+}
+function lineFC(coords) {
+  return { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }] };
+}
+
+function setCursorMode(locked) {
+  document.body.classList.toggle('locked', locked);
+  document.body.classList.toggle('reticle', !locked);
+}
+
+async function onMapClick(e) {
+  if (state.guessLocked || !state.currentResort) return;
+  state.guessLocked = true;
+  setCursorMode(true);
+
+  const guess = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+  const truth = state.currentResort;
+  const km = haversineKm(guess, truth);
+  const pts = scoreFromKm(km);
+  state.score += pts;
+  state.history.push({ resort: truth, km, pts });
+
+  map.getSource('guess').setData(pointFC(guess.lng, guess.lat));
+  map.getSource('truth').setData(pointFC(truth.lng, truth.lat));
+  map.getSource('arc').setData(lineFC(greatCircleLine(guess, truth)));
+
+  // Cinematic fly: tilt in for closer rounds, fit-bounds for farther
+  if (km < 800) {
+    map.flyTo({ center: [truth.lng, truth.lat], zoom: 8.5, pitch: 60, bearing: 25, duration: 2200, essential: true });
+  } else {
+    const bounds = new maplibregl.LngLatBounds();
+    bounds.extend([guess.lng, guess.lat]);
+    bounds.extend([truth.lng, truth.lat]);
+    map.fitBounds(bounds, { padding: { top: 180, bottom: 300, left: 80, right: 80 }, duration: 1500, pitch: 35, maxZoom: 7 });
+  }
+
+  document.getElementById('score-display').textContent = state.score.toLocaleString();
+  document.getElementById('result-name').textContent = truth.name;
+  document.getElementById('result-sub').textContent = truth.country;
+  document.getElementById('result-distance').textContent = formatDistance(km);
+  document.getElementById('result-points').textContent = '+' + pts.toLocaleString();
+  document.getElementById('next-btn').textContent = state.round === ROUNDS ? 'See Results' : 'Next';
+
+  const photoEl = document.getElementById('result-photo');
+  photoEl.classList.add('empty');
+  photoEl.style.backgroundImage = '';
+  photoEl.innerHTML = '';
+  document.getElementById('result').classList.add('show');
+
+  const img = await fetchResortImage(truth);
+  if (img && state.currentResort === truth) {
+    photoEl.style.backgroundImage = `url("${img}")`;
+    photoEl.classList.remove('empty');
+    photoEl.innerHTML = '<span class="photo-credit">Wikipedia</span>';
+  }
+}
+
+function formatDistance(km) {
+  if (km < 1) return Math.round(km * 1000) + ' m';
+  if (km < 100) return km.toFixed(1) + ' km';
+  return Math.round(km).toLocaleString() + ' km';
+}
+
+function nextRound() {
+  document.getElementById('result').classList.remove('show');
+  state.guessLocked = false;
+  setCursorMode(false);
+
+  map.getSource('guess').setData(empty());
+  map.getSource('truth').setData(empty());
+  map.getSource('arc').setData(empty());
+
+  if (state.round >= ROUNDS) { showEnd(); return; }
+
+  state.round += 1;
+  state.currentResort = state.queue[state.round - 1];
+  document.getElementById('round-display').textContent = state.round + ' / ' + ROUNDS;
+  document.getElementById('prompt-name').textContent = state.currentResort.name;
+
+  map.flyTo({
+    center: [10 + (Math.random() - 0.5) * 60, 25 + (Math.random() - 0.5) * 30],
+    zoom: 1.4, pitch: 0, bearing: 0, duration: 1400,
+  });
+}
+
+function startGame() {
+  state.round = 0;
+  state.score = 0;
+  state.history = [];
+  state.queue = shuffle(RESORTS).slice(0, ROUNDS);
+  document.getElementById('score-display').textContent = '0';
+  document.getElementById('start-modal').classList.add('hidden');
+  document.getElementById('end-modal').classList.add('hidden');
+  nextRound();
+}
+
+function ratingFor(scoreOf100) {
+  if (scoreOf100 >= 90) return 'Mountain Goat 🏔️';
+  if (scoreOf100 >= 75) return 'Alpine Pro';
+  if (scoreOf100 >= 55) return 'Black Diamond';
+  if (scoreOf100 >= 35) return 'Blue Square';
+  if (scoreOf100 >= 15) return 'Green Circle';
+  return 'Bunny Slope';
+}
+
+function emojiForPts(pts) {
+  if (pts >= 4500) return '🟩';
+  if (pts >= 3500) return '🟨';
+  if (pts >= 2500) return '🟧';
+  if (pts >= 1000) return '🟥';
+  return '⬛';
+}
+
+function buildEmojiRow() {
+  return state.history.map(h => emojiForPts(h.pts)).join('');
+}
+
+function showEnd() {
+  const scoreOf100 = Math.round((state.score / MAX_TOTAL) * 100);
+  document.getElementById('final-score').textContent = scoreOf100;
+  document.getElementById('final-rating').textContent = ratingFor(scoreOf100);
+  document.getElementById('emoji-row').textContent = buildEmojiRow();
+  const rows = state.history.map(h =>
+    `<div class="breakdown-row"><span class="name">${h.resort.name}</span><span><span style="color:var(--muted)">${formatDistance(h.km)}</span> &nbsp; <span class="pts">+${h.pts.toLocaleString()}</span></span></div>`
+  ).join('');
+  document.getElementById('breakdown').innerHTML = rows;
+  document.getElementById('end-modal').classList.remove('hidden');
+}
+
+async function share() {
+  const scoreOf100 = Math.round((state.score / MAX_TOTAL) * 100);
+  const text = `SkiTap ${scoreOf100}/100 🎿\n${buildEmojiRow()}\n${ratingFor(scoreOf100)}\nhttps://nosheal.github.io/skitapp`;
+  if (navigator.share) {
+    try { await navigator.share({ title: 'SkiTap', text }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    const toast = document.getElementById('share-toast');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1800);
+  } catch (e) {
+    prompt('Copy your score:', text);
+  }
+}
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', startGame);
+document.getElementById('next-btn').addEventListener('click', nextRound);
+document.getElementById('share-btn').addEventListener('click', share);
+</script>
+</body>
+</html>
