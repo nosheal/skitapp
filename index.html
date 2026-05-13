@@ -335,6 +335,14 @@ const MODES = {
 };
 function pool(mode) { return RESORTS.filter(MODES[mode].filter); }
 function seedFor(mode) { return mode === 'na' ? puzzleNumber() * 31 + 7 : puzzleNumber(); }
+function shareUrlFor(mode) {
+  return mode === 'na'
+    ? 'https://nosheal.github.io/skitapp/north-america'
+    : 'https://nosheal.github.io/skitapp';
+}
+
+const _initialMode = new URLSearchParams(window.location.search).get('mode');
+if (_initialMode === 'na' || _initialMode === 'world') state.mode = _initialMode;
 
 function haversineKm(a, b) {
   const R = 6371;
@@ -650,7 +658,7 @@ function showEnd() {
 async function share() {
   const scoreOf100 = Math.round((state.score / MAX_TOTAL) * 100);
   const tag = MODES[state.mode].short ? ` ${MODES[state.mode].short}` : '';
-  const text = `SkiTap${tag} #${puzzleNumber()} — ${scoreOf100}/100 🎿\n${buildEmojiRow()}\n${ratingFor(scoreOf100)}\nhttps://nosheal.github.io/skitapp`;
+  const text = `SkiTap${tag} #${puzzleNumber()} — ${scoreOf100}/100 🎿\n${buildEmojiRow()}\n${ratingFor(scoreOf100)}\n${shareUrlFor(state.mode)}`;
   if (navigator.share) {
     try { await navigator.share({ title: 'SkiTap', text }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
@@ -688,6 +696,9 @@ document.querySelectorAll('#mode-chips .chip').forEach(chip => {
 document.getElementById('count-world').textContent = pool('world').length;
 document.getElementById('count-na').textContent = pool('na').length;
 document.getElementById('restart-btn').textContent = 'Replay';
+document.querySelectorAll('#mode-chips .chip').forEach(c => {
+  c.classList.toggle('selected', c.dataset.mode === state.mode);
+});
 refreshKickers();
 </script>
 </body>
