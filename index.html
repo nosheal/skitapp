@@ -1104,10 +1104,6 @@ function showEnd() {
 async function share() {
   const tag = MODES[state.mode].short ? ` ${MODES[state.mode].short}` : '';
   const text = `SkiTap${tag} ${shortDateLabel()}\n${buildRoundRow()}\nFinal score: ${finalSumOf500()}\n${shareUrlFor(state.mode)}`;
-  if (navigator.share) {
-    try { await navigator.share({ title: 'SkiTap', text }); return; }
-    catch (e) { if (e.name === 'AbortError') return; }
-  }
   try {
     await navigator.clipboard.writeText(text);
     const toast = document.getElementById('share-toast');
